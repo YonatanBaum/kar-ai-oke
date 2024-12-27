@@ -18,7 +18,7 @@ if api_key is None:
     )
 
 client = OpenAI(api_key=api_key)
-
+path =""
 
 n_image=0
 
@@ -119,13 +119,16 @@ body, html {
 """
 
 PROMPT="""
-Generate a funny and zany presentation title and 20 slides about {description}.
+You are throwing a powerpoint karaoke improv challenge and are writing a presentation about the subject: "{description}"
+Generate an offbeat, funny yet coherent presentation. 
+Start with the title. Which you will keep short and sweet.
+Then, move to generate {slides_count} slide titles which the person performing will have to use as prompt to improvise with.
+It is highly important for all the slide title to be relevant to the subject, and they also must tell a cohesive story as a whole. Meaning that each title must be somewhat related to the one who came before it.
+Each slide title must be 3-7 words and end in a newline.
 Please use HTML tags to format bold and italic text if needed. DO NOT USE MARKDOWN.
-The first line should be a catchy title for the presentation. 
-Then follow with 18 slide topics that are funny and zany. Each should be 5-15 words ending in a newline.
-Finally conclude with a funny or zany closing slide.
-Try to make it a coherent funny weird lecture with beginning, middle and end.
+Make it VERY challenging to the person performing.
 Do not begin any line with a bullet point, any numbering, quotation marks, or any other text. Each line will be displayed verbatim. 
+No need to prefix the titles or divide to parts, output as a list of titles seperated by newlines.
 Thank you!
 """
 
@@ -150,7 +153,7 @@ Create a photo of office workers in a meeting discussing the topic: {description
 def clean_chatgpt_response(text):
     # Remove Markdown elements like ** (bold)
     text = re.sub(r"\*\*", "", text)
-    
+
     # Remove "Slide: <number>" or "Slide <number>" patterns anywhere in the line
     # It may either have a colon or not
     text = re.sub(r"Slide: \d+", "", text)
@@ -201,13 +204,13 @@ def strip_html(html):
     return stripper.get_data()
 
 
-def generate_presentation_content(description):
+def generate_presentation_content(description, slides_count):
     print ("About to generate content")
     response = client.chat.completions.create(
-        model="gpt-4-turbo-preview",
+        model="gpt-4o",
         messages=[
             {"role": "system", "content": "You are a creative assistant."},
-            {"role": "user", "content": PROMPT.format(description=description)}
+            {"role": "user", "content": PROMPT.format(description=description, slides_count=slides_count)}
         ]
     )
     print ("Done generating content")
@@ -226,6 +229,7 @@ def generate_presentation_content(description):
 
 def generate_image_for_bullet_point(bullet_point):
     global n_image
+    global path
     try:
         # Generate an image using DALL-E
         print("Generating image for:", bullet_point)
@@ -235,7 +239,7 @@ def generate_image_for_bullet_point(bullet_point):
                 tmp_prompt=IMG_PROMPT_2
             elif random.random() < 0.2:
                 tmp_prompt=IMG_PROMPT_3
-        response = client.images.generate(prompt=tmp_prompt.format(description=strip_html(bullet_point)),
+        response = client.images.generate(model="dall-e-3", prompt=tmp_prompt.format(description=strip_html(bullet_point)),
         n=1,
         size="1024x1024")
         
@@ -252,7 +256,7 @@ def generate_image_for_bullet_point(bullet_point):
         image_path = f"images/image_{n_image}.jpg"
         print("Saving image to:", image_path)
         image = image.convert("RGB")  # Convert to RGB if not already in this mode
-        image.save("presentation/"+image_path, "JPEG")
+        image.save(f"{path}/{image_path}", "JPEG")
         print("Saved image to:", image_path)
         n_image+=1
         return image_path
@@ -269,6 +273,13 @@ def create_slide_html(image_path, text):
             <p>{text}</p>
         </div>
     '''
+
+def create_final_slide():
+    return f'''
+    <div class="slide" style="background: black">
+            <p>Questions?</p>
+        </div>
+'''
 
 def create_presentation_html(slides):
     slides_html = "\n".join(slides)
@@ -357,10 +368,12 @@ def generate_topic():
     
     return topic
 
-def main(description):
-    os.makedirs("presentation", exist_ok=True)
-    os.makedirs("presentation/images", exist_ok=True)
-    content = generate_presentation_content(description)
+def main(description, slides_count):
+    global path
+    path = f"presentation_{description.replace(" ","_")}"
+    os.makedirs(path, exist_ok=True)
+    os.makedirs(f"{path}/images", exist_ok=True)
+    content = generate_presentation_content(description, slides_count)
     
     slides = [] #create_slide_html("", content["title"])]  # Title slide
     
@@ -373,14 +386,16 @@ def main(description):
         image_path = generate_image_for_bullet_point(bullet_point)
         slide_html = create_slide_html(image_path, bullet_point)
         slides.append(slide_html)
+    final_slide = create_final_slide()
+    slides.append(final_slide)
     
     presentation_html = create_presentation_html(slides)
     
-    with open("presentation/index.html", "w") as file:
+    with open(f"{path}/index.html", "w") as file:
         file.write(presentation_html)
-    with open("presentation/script.js", "w") as file:
+    with open(f"{path}/script.js", "w") as file:
         file.write(JS_FILE)
-    with open("presentation/style.css", "w") as file:
+    with open(f"{path}/style.css", "w") as file:
         file.write(CSS_FILE)
 
 def generate_topic_prompt():
@@ -394,6 +409,8 @@ def generate_topic_prompt():
 
 if __name__ == "__main__":
     description = input("Enter a one-line description for the presentation, or return for random: ")
+    slides = input("Enter how many slides you wish the presentation to include other than the title. Default is 5 ")
+    slides_count = int(slides) if slides.isnumeric() and int(slides) > 0 else 5
     if description.strip() == "":
         description = generate_topic_prompt()
-    main(description)
+    main(description, slides_count)
